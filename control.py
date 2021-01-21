@@ -10,10 +10,12 @@ STATUS_SERVER_ADDR = "0.0.0.0"
 STATUS_SERVER_PORT = 8890
 
 DRONE_COMMAND_ADDR   = ("192.168.10.1", 8889)
+RETRY_DELAY = 1
 
 BUFFER_SIZE = 1024
 
-COMMAND_DELAY = 1
+STATUS_DISPLAY_INTERVAL = 1
+MAX_RETRY = 3
 
 droneStatus = {
     "mid" : -100,
@@ -58,8 +60,38 @@ def statusServer():
         except Exception as e:
             print("analyzer" + e)
 
+def statusDebug():
+    while True:
+        time.sleep(STATUS_DISPLAY_INTERVAL)
+        print("\t\t\t" + str(droneStatus))
 
+def sendCommand(cmd,udpSocket,wait = True):
+    COMMAND = str.encode(cmd)
+    try:
+        sendOK = False
+        print("# send " + cmd + " ...")
+        udpSocket.sendto(COMMAND, DRONE_COMMAND_ADDR)
 
+        if not wait:
+            return
+
+        recvMsg = udpSocket.recvfrom(BUFFER_SIZE)[0].decode("utf-8") 
+            
+        while not sendOK:
+            if recvMsg == "ok":
+                print(">> OK")
+                break
+            elif recvMsg == "error":
+                print(">> Error")
+                break
+            elif recvMsg != "":        
+                print(">> " + recvMsg)
+                break
+            else:
+                recvMsg = udpSocket.recvfrom(BUFFER_SIZE)[0].decode("utf-8") 
+            time.sleep(RETRY_DELAY)
+    except Exception as e:
+        print(e)
 
 def udpClient():
     global droneStatus
@@ -70,45 +102,70 @@ def udpClient():
 
     UDPClientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
 
-    def sendCommand(cmd,udpSocket):
-        COMMAND_FLAG = str.encode("command")
-        COMMAND = str.encode(cmd)
-        try:
-            print("# send COMMAND flag...")
-            while True:
-                udpSocket.sendto(COMMAND_FLAG, DRONE_COMMAND_ADDR)
-                recvMsg = udpSocket.recvfrom(BUFFER_SIZE)[0].decode("utf-8") 
-                if recvMsg == "ok":
-                    print(">> OK")
-                    break
-
-            while True:
-                print("# send " + cmd + " ...")
-                udpSocket.sendto(COMMAND, DRONE_COMMAND_ADDR)
-                recvMsg = udpSocket.recvfrom(BUFFER_SIZE)[0].decode("utf-8") 
-                if recvMsg == "ok":
-                    print(">> OK")
-                    break
-            # print(droneStatus)
-        except Exception as e:
-            print(e)
     
 
+
+
+    """ ### COMMANDS LIST ###
+    mdirection x=0/1/2  [downward,foward,both]
+    rc a b c d [LR,FB,UD,yaw] +-100
+    takeoff
+    stop
+    land
+    """
+
     # 制御コマンドはここから
+    # enable dev mode
+    sendCommand("command",UDPClientSocket)
+    # enable mission pad
     sendCommand("mon",UDPClientSocket)
-    while droneStatus["mid"] != 5:
-        time.sleep(COMMAND_DELAY)
-        print(droneStatus)
-        #pass
-    sendCommand("moff",UDPClientSocket)
+    sendCommand("mdirection 0",UDPClientSocket)
+    # take off
+    sendCommand("takeoff",UDPClientSocket)
+    #time.sleep(COMMAND_DELAY)
+
+    if droneStatus["mid"] != 1:
+        # move left
+        sendCommand("left 50",UDPClientSocket)
+    if droneStatus["mid"] != 1:
+        # move right
+        sendCommand("right 100",UDPClientSocket)
+    if droneStatus["mid"] != 1:
+        sendCommand("left 50",UDPClientSocket)
+    if droneStatus["mid"] != 1:
+        sendCommand("foward 50",UDPClientSocket)
+    if droneStatus["mid"] != 1:
+        sendCommand("back 100",UDPClientSocket)
+
+    if droneStatus["mid"] != 1:
+        print("cannot find mpad 1")
+    else:
+        print("found mpad 1")
+        sendCommand("rc 0 20 0 0",UDPClientSocket,False)
+        print("Waiting for pad2")
+        while droneStatus["mid"] != 2:
+            pass
+    print("Found mpad2")
+    # turnoff rc
+    sendCommand("rc 0 0 0 0",UDPClientSocket,False)
+    sendCommand("land",UDPClientSocket)
+
+    
        
 
-# Create two threads as follows
-try:
-   _thread.start_new_thread( statusServer, () )
-   _thread.start_new_thread( udpClient, () )
-except:
-   print("Error: unable to start thread")
+def main():
+    try:
+        # get and update drone status obj
+        _thread.start_new_thread( statusServer,())
+        # msg sender thread
+        _thread.start_new_thread( udpClient,())
+        # print out the current drone status
+        _thread.start_new_thread( statusDebug,())
+    except:
+        print("Error: unable to start thread")
 
-while 1:
-   pass
+    while 1:
+        pass
+
+if __name__ == "__main__":
+    main()
