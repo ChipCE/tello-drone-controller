@@ -6,76 +6,106 @@ import random
 import socket
 
 # UDP server(drone status thread)
-STATUS_SERVER_ADDR = "192.168.10.2"
+STATUS_SERVER_ADDR = "0.0.0.0"
 STATUS_SERVER_PORT = 8890
-
-RESPONSE_SERVER_ADDR = "192.168.10.2"
-RESPONSE_SERVERPORT = 9999
-
-BUFFER_SIZE = 1024
 
 DRONE_COMMAND_ADDR   = ("192.168.10.1", 8889)
 
-# UDP client for command parsing
+BUFFER_SIZE = 1024
 
-statusMsg = ""
-responseMsg = ""
+COMMAND_DELAY = 1
+
+droneStatus = {
+    "mid" : -100,
+    "x" : -100,
+    "y" : -100,
+    "z" : -100,
+    "h" : -100,
+    "baro" : -100,
+    "time" : -100,
+    "agx" : -100,
+    "agy" : -100,
+    "agz" : -100,
+    "pitch" : -100,
+    "roll" : -100,
+    "yaw" : -100,
+    "vgx" : -100,
+    "vgy" : -100,
+    "vgz" : -100,
+    "templ" : -100,
+    "temph" : -100,
+    "tof" : -100,
+    "bat" : -100
+}
+
 
 # Define a function for the thread
 def statusServer():
-    global statusMsg
-    server = socket.socket() 
+    global droneStatus
+    server = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
     server.bind((STATUS_SERVER_ADDR, STATUS_SERVER_PORT)) 
-    server.listen(4) 
-    client_socket, client_address = server.accept()
-    print(client_address, "has connected")
     print("Status server is ready")
 
     while(True):
-        recvieved_data = client_socket.recv(BUFFER_SIZE)
-        print("Status " + recvieved_data)
-
-def responseServer():
-    global responseMsg
-    server = socket.socket() 
-    server.bind((RESPONSE_SERVER_ADDR, RESPONSE_SERVERPORT)) 
-    server.listen(4) 
-    client_socket, client_address = server.accept()
-    print(client_address, "has connected")
-    print("Response server is ready")
-
-    while(True):
-        recvieved_data = client_socket.recv(BUFFER_SIZE)
-        print("Response " + recvieved_data)
+        try:
+            recvData = server.recvfrom(BUFFER_SIZE)[0].decode("utf-8")
+            # break down data in to object
+            tmpParams = recvData.split(";")
+            for param in tmpParams:
+                pairVal = param.split(":")
+                if pairVal[0] != "mpry" and len(pairVal) > 1:
+                    droneStatus[pairVal[0]] = float(pairVal[1])
+        except Exception as e:
+            print("analyzer" + e)
 
 
 
 
 def udpClient():
-    global statusMsg
-    global responseMsg
+    global droneStatus
 
     COMMAND = str.encode("command")
     TAKEOFF = str.encode("takeoff")
+    ENABLE_MPAD = str.encode("mon")
 
     UDPClientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+
+    def sendCommand(cmd,udpSocket):
+        COMMAND_FLAG = str.encode("command")
+        COMMAND = str.encode(cmd)
+        try:
+            print("# send COMMAND flag...")
+            while True:
+                udpSocket.sendto(COMMAND_FLAG, DRONE_COMMAND_ADDR)
+                recvMsg = udpSocket.recvfrom(BUFFER_SIZE)[0].decode("utf-8") 
+                if recvMsg == "ok":
+                    print(">> OK")
+                    break
+
+            while True:
+                print("# send " + cmd + " ...")
+                udpSocket.sendto(COMMAND, DRONE_COMMAND_ADDR)
+                recvMsg = udpSocket.recvfrom(BUFFER_SIZE)[0].decode("utf-8") 
+                if recvMsg == "ok":
+                    print(">> OK")
+                    break
+            # print(droneStatus)
+        except Exception as e:
+            print(e)
     
 
-    delay = 5
-    count = 0
-    while count < 5:
-        print("Sending command...")
-        time.sleep(delay)
-        count += 1
-        UDPClientSocket.sendto(COMMAND, DRONE_COMMAND_ADDR)
-        msgFromServer = UDPClientSocket.recvfrom(BUFFER_SIZE)
-        time.sleep(1)
-        UDPClientSocket.sendto(TAKEOFF, DRONE_COMMAND_ADDR)
+    # 制御コマンドはここから
+    sendCommand("mon",UDPClientSocket)
+    while droneStatus["mid"] != 5:
+        time.sleep(COMMAND_DELAY)
+        print(droneStatus)
+        #pass
+    sendCommand("moff",UDPClientSocket)
+       
 
 # Create two threads as follows
 try:
    _thread.start_new_thread( statusServer, () )
-   _thread.start_new_thread( responseServer, () )
    _thread.start_new_thread( udpClient, () )
 except:
    print("Error: unable to start thread")
